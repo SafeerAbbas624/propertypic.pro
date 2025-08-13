@@ -76,11 +76,10 @@ import { createPgPool, ensureSchema, ensureDefaultAdmin, pgAuthRouter } from './
     serveStatic(app);
   }
 
-  // ALWAYS serve the app on port 5000
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = 5000;
-  server.listen(port, "localhost", () => {
+  // Serve the app on a local-only port (default 5050) to avoid conflicts
+  // with other services. Override with PORT env var if needed.
+  const port = Number(process.env.PORT || 5050);
+  server.listen(port, "127.0.0.1", () => {
     log(`serving on port ${port}`);
   });
 })();
