@@ -72,9 +72,13 @@ export class DatabaseStorage implements IStorage {
       squareFeet: insertLead.squareFeet,
       token: insertLead.token,
       propertyType: insertLead.propertyType || "SFR",
+      hasPool: insertLead.hasPool ?? false,
+      hasBasement: insertLead.hasBasement ?? false,
+      hasGarage: insertLead.hasGarage ?? false,
+      notes: insertLead.notes ?? null,
       mediaStatus: "incomplete"
     }).returning();
-    
+
     return lead;
   }
 
