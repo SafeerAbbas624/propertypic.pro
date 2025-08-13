@@ -352,7 +352,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/property-folders', async (req, res) => {
     try {
       const folders = await storage.getAllPropertyLeadsWithMedia();
-      res.json(folders);
+
+      // Ensure mediaCount and URLs align with on-disk layout by checking both folder naming schemes
+      const normalized = folders.map((f) => {
+        const addressFolder = `${(f.address || '').replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_')}_${f.city || ''}`;
+        const addressDir = path.join(process.cwd(), 'uploads', addressFolder);
+        const tokenDir = f.token ? path.join(process.cwd(), 'uploads', f.token) : '';
+        let mediaCount = f.mediaCount;
+        try {
+          // If DB count is zero but address folder exists, use filesystem count as fallback
+          if ((!mediaCount || mediaCount === 0) && fs.existsSync(addressDir)) {
+            mediaCount = fs.readdirSync(addressDir).length;
+          } else if ((!mediaCount || mediaCount === 0) && f.token && fs.existsSync(tokenDir)) {
+            mediaCount = fs.readdirSync(tokenDir).length;
+          }
+        } catch {}
+        return { ...f, mediaCount };
+      });
+
+      res.json(normalized);
     } catch (error) {
       console.error('Error fetching property folders:', error);
       res.status(500).json({ message: 'Server error' });
@@ -366,8 +384,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: 'Invalid lead ID' });
       }
 
+      // Fetch the lead to compute folder names
+      const lead = await storage.getPropertyLeadById(leadId);
+      if (!lead) {
+        return res.status(404).json({ message: 'Property lead not found' });
+      }
+
+      const addressFolder = `${(lead.address || '').replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_')}_${lead.city || ''}`;
+
       const media = await storage.getPropertyMediaWithDetails(leadId);
-      res.json(media);
+
+      // Ensure fileUrl points to an existing local file path. Try both address-based and token-based folders.
+      const normalized = media.map((m) => {
+        let fileUrl = m.fileUrl;
+        try {
+          const fileName = m.fileName;
+          const addrPath = path.join(process.cwd(), 'uploads', addressFolder, fileName);
+          const tokenPath = lead.token ? path.join(process.cwd(), 'uploads', lead.token, fileName) : '';
+
+          if (fs.existsSync(addrPath)) {
+            fileUrl = `/uploads/${addressFolder}/${fileName}`;
+          } else if (lead.token && fs.existsSync(tokenPath)) {
+            fileUrl = `/uploads/${lead.token}/${fileName}`;
+          }
+        } catch {}
+        return { ...m, fileUrl };
+      });
+
+      res.json(normalized);
     } catch (error) {
       console.error('Error fetching property media:', error);
       res.status(500).json({ message: 'Server error' });
