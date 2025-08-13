@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/alert-dialog';
 
 interface PropertyFolder {
-  id: number;
+  id: string;
   name: string;
   address: string;
   city: string;
@@ -45,7 +45,7 @@ interface MediaFile {
 }
 
 export default function FileBrowser() {
-  const [selectedPropertyId, setSelectedPropertyId] = useState<number | null>(null);
+  const [selectedPropertyId, setSelectedPropertyId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [, navigate] = useLocation();
   const { toast } = useToast();
@@ -57,16 +57,19 @@ export default function FileBrowser() {
     refetchOnWindowFocus: false
   });
 
-  // Fetch files for selected property
+  // Get selected property details
+  const selectedProperty = propertyFolders?.find(f => f.id === selectedPropertyId);
+
+  // Fetch files for selected property using token
   const { data: mediaFiles, isLoading: filesLoading, refetch: refetchFiles } = useQuery<MediaFile[]>({
-    queryKey: [`/api/property-media/${selectedPropertyId}`, selectedPropertyId],
-    enabled: !!selectedPropertyId,
+    queryKey: [`/api/property-media/${selectedProperty?.token}`, selectedProperty?.token],
+    enabled: !!selectedProperty?.token,
     refetchOnWindowFocus: false
   });
 
   // Delete property folder mutation
   const deletePropertyMutation = useMutation({
-    mutationFn: async (propertyId: number) => {
+    mutationFn: async (propertyId: string) => {
       const response = await fetch(`/api/property-folders/${propertyId}`, {
         method: 'DELETE',
       });
@@ -109,7 +112,7 @@ export default function FileBrowser() {
         title: "Success",
         description: "Media file deleted successfully",
       });
-      queryClient.invalidateQueries({ queryKey: [`/api/property-media/${selectedPropertyId}`, selectedPropertyId] });
+      queryClient.invalidateQueries({ queryKey: [`/api/property-media/${selectedProperty?.token}`, selectedProperty?.token] });
       queryClient.invalidateQueries({ queryKey: ['/api/property-folders'] });
     },
     onError: (error) => {

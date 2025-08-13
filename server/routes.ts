@@ -353,14 +353,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const folders = await storage.getAllPropertyLeadsWithMedia();
 
-      // Ensure mediaCount and URLs align with on-disk layout by checking both folder naming schemes
+      // Augment counts with on-disk counts if DB shows zero
       const normalized = folders.map((f) => {
         const addressFolder = `${(f.address || '').replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_')}_${f.city || ''}`;
         const addressDir = path.join(process.cwd(), 'uploads', addressFolder);
         const tokenDir = f.token ? path.join(process.cwd(), 'uploads', f.token) : '';
         let mediaCount = f.mediaCount;
         try {
-          // If DB count is zero but address folder exists, use filesystem count as fallback
           if ((!mediaCount || mediaCount === 0) && fs.existsSync(addressDir)) {
             mediaCount = fs.readdirSync(addressDir).length;
           } else if ((!mediaCount || mediaCount === 0) && f.token && fs.existsSync(tokenDir)) {
@@ -379,29 +378,121 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get('/api/property-media/:leadId', async (req, res) => {
     try {
-      const leadId = parseInt(req.params.leadId);
-      if (isNaN(leadId)) {
-        return res.status(400).json({ message: 'Invalid lead ID' });
+      const idOrToken = req.params.leadId;
+
+      // Try to resolve lead by: 1) UUID (property ID), 2) numeric ID, 3) token
+      let lead = null;
+      const isNumeric = /^\d+$/.test(idOrToken);
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrToken);
+
+      if (isUUID) {
+        lead = await storage.getPropertyLeadByUUID(idOrToken);
+      } else if (isNumeric) {
+        lead = await storage.getPropertyLeadById(parseInt(idOrToken, 10));
+      } else {
+        lead = await storage.getPropertyLeadByToken(idOrToken);
       }
 
-      // Fetch the lead to compute folder names
-      const lead = await storage.getPropertyLeadById(leadId);
       if (!lead) {
+        // Fallback: if param is a token and there is a folder with that name, serve files directly
+        if (!isNumeric) {
+          const tokenFolder = path.join(process.cwd(), 'uploads', idOrToken);
+          if (fs.existsSync(tokenFolder)) {
+            try {
+              const files = fs.readdirSync(tokenFolder);
+              const mapped = files
+                .map((fileName) => {
+                  const localPath = path.join(tokenFolder, fileName);
+                  const stat = fs.statSync(localPath);
+                  if (!stat.isFile()) return null;
+                  const ext = path.extname(fileName).toLowerCase();
+                  const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
+                  const isVideo = ['.mp4', '.webm', '.mov'].includes(ext);
+                  const fileType = isImage ? 'photo' : isVideo ? 'video' : 'file';
+                  if (fileType === 'file') return null;
+                  return {
+                    id: -1,
+                    fileName,
+                    fileType,
+                    fileSize: stat.size,
+                    fileUrl: `/uploads/${idOrToken}/${fileName}`,
+                    stepTitle: fileName,
+                    timestamp: new Date().toISOString(),
+                    mimeType: undefined,
+                    isSyncedToGoogleDrive: false,
+                  };
+                })
+                .filter(Boolean);
+              return res.json(mapped);
+            } catch (e) {
+              console.warn('Token-folder fallback failed:', e);
+            }
+          }
+        }
         return res.status(404).json({ message: 'Property lead not found' });
       }
 
       const addressFolder = `${(lead.address || '').replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_')}_${lead.city || ''}`;
 
-      const media = await storage.getPropertyMediaWithDetails(leadId);
+      let media = await storage.getPropertyMediaWithDetails(lead.id);
 
-      // Ensure fileUrl points to an existing local file path. Try both address-based and token-based folders.
+      // Fallback: if DB is empty, scan uploads folder(s) and backfill
+      if (!media || media.length === 0) {
+        const addressDir = path.join(process.cwd(), 'uploads', addressFolder);
+        const tokenDir = lead.token ? path.join(process.cwd(), 'uploads', lead.token) : '';
+        const dirsToScan = [addressDir, tokenDir].filter((d) => !!d && fs.existsSync(d));
+
+        for (const dir of dirsToScan) {
+          try {
+            const files = fs.readdirSync(dir);
+            for (const fileName of files) {
+              const localPath = path.join(dir, fileName);
+              const stat = fs.statSync(localPath);
+              if (!stat.isFile()) continue;
+              const ext = path.extname(fileName).toLowerCase();
+              const isImage = ['.jpg', '.jpeg', '.png', '.gif', '.webp'].includes(ext);
+              const isVideo = ['.mp4', '.webm', '.mov'].includes(ext);
+              const fileType = isImage ? 'photo' : isVideo ? 'video' : 'file';
+              if (fileType === 'file') continue; // skip unknown types
+
+              const folderName = path.basename(dir);
+              const fileUrl = `/uploads/${folderName}/${fileName}`;
+
+              // Avoid duplicates by file name
+              if (media?.some((m) => m.fileName === fileName)) continue;
+
+              await storage.createPropertyMedia({
+                propertyLeadId: lead.id,
+                leadToken: lead.token,
+                step: 'legacy',
+                stepTitle: fileName,
+                fileName,
+                fileUrl,
+                localPath,
+                fileType: fileType as any,
+                fileSize: stat.size,
+                mimeType: undefined,
+                googleDriveFileId: null as any,
+                isSyncedToGoogleDrive: false,
+                metadata: { importedFrom: 'fs-scan' } as any,
+              });
+            }
+          } catch (e) {
+            console.warn('FS scan error:', e);
+          }
+        }
+
+        // re-fetch after backfill
+        media = await storage.getPropertyMediaWithDetails(lead.id);
+      }
+
+      // Normalize file URLs to whichever folder actually contains the file
       const normalized = media.map((m) => {
         let fileUrl = m.fileUrl;
         try {
           const fileName = m.fileName;
           const addrPath = path.join(process.cwd(), 'uploads', addressFolder, fileName);
           const tokenPath = lead.token ? path.join(process.cwd(), 'uploads', lead.token, fileName) : '';
-
           if (fs.existsSync(addrPath)) {
             fileUrl = `/uploads/${addressFolder}/${fileName}`;
           } else if (lead.token && fs.existsSync(tokenPath)) {

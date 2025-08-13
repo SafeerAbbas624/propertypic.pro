@@ -204,6 +204,11 @@ export class DatabaseStorage implements IStorage {
     return lead;
   }
 
+  async getPropertyLeadByUUID(uuid: string): Promise<PropertyLead | undefined> {
+    const [lead] = await db.select().from(propertyLeads).where(eq(propertyLeads.id, uuid));
+    return lead;
+  }
+
   async deletePropertyLead(id: number): Promise<void> {
     await db.delete(propertyLeads).where(eq(propertyLeads.id, id));
   }
