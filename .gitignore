@@ -1,0 +1,29 @@
+# Node / build
+node_modules
+dist
+.DS_Store
+server/public
+vite.config.ts.*
+*.tar.gz
+
+# Environment and secrets
+.env
+.env.*
+attached_assets/
+temp_credentials.json
+
+# Local data and uploads
+uploads/
+*.db
+database.sqlite
+mediavault.db
+
+# Logs and temp files
+*.log
+logs.txt
+test-upload.txt
+
+# Misc
+generated-icon.png
+.local/
+.Local/
