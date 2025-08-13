@@ -21,11 +21,8 @@ function Router() {
           <Home />
         </Protected>
       )} />
-      <Route path="/upload/:token" component={() => (
-        <Protected>
-          <PropertyMediaUpload />
-        </Protected>
-      )} />
+      {/* Public upload route: no login required */}
+      <Route path="/upload/:token" component={PropertyMediaUpload} />
       <Route path="/browse" component={() => (
         <Protected>
           <FileBrowser />
