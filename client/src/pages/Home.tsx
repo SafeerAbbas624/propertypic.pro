@@ -89,8 +89,8 @@ const Home = () => {
         description: `New inspection token created: ${data.token}`,
       });
 
-      // Navigate to the upload page with the new token
-      navigate(`/upload/${data.token}`);
+      // Navigate to the property created page to show details and link
+      navigate(`/property-created/${data.token}`);
     } catch (error) {
       console.error("Error creating property:", error);
       toast({

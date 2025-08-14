@@ -17,7 +17,7 @@ interface FlexibleInspectionViewProps {
     fileType: "photo" | "video";
   }>;
   onStepSelect: (step: InspectionStep) => void;
-  onCapture: (file: File, mode: "photo" | "video") => void;
+  onCapture: (file: File, mode: "photo" | "video") => Promise<void>;
   onConfirmMedia: () => Promise<void>;
   onRetakeMedia: () => void;
   onCompleteInspection: () => void;

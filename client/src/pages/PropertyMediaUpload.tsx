@@ -120,9 +120,9 @@ const PropertyMediaUpload = () => {
       steps={steps}
       uploadedMedia={uploadedMedia}
       onStepSelect={selectStep}
-      onCapture={(file, mode) => {
+      onCapture={async (file, mode) => {
         setCaptureMode(mode);
-        setMediaFile(file);
+        await setMediaFile(file);
       }}
       onConfirmMedia={confirmMedia}
       onRetakeMedia={retakeMedia}

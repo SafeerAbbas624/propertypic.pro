@@ -9,6 +9,7 @@ import { getInspectionSteps, InspectionStep, PropertyFeatures } from "@/lib/insp
 import { useFirebaseStorage } from "@/hooks/use-firebase-storage";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { compressImage } from "@/lib/utils";
 
 // Define the context state
 interface InspectionContextState {
@@ -35,7 +36,7 @@ interface InspectionContextState {
   goToNextStep: () => void;
   goToPreviousStep: () => void;
   setCaptureMode: (mode: "photo" | "video") => void;
-  setMediaFile: (file: File) => void;
+  setMediaFile: (file: File) => Promise<void>;
   confirmMedia: () => Promise<void>;
   retakeMedia: () => void;
   completeInspection: () => void;
@@ -115,12 +116,58 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({
     }));
   }, []);
 
-  const setMediaFile = useCallback((file: File) => {
-    setState((prev) => ({
-      ...prev,
-      mediaFile: file,
-      isReviewing: true,
-    }));
+  const setMediaFile = useCallback(async (file: File) => {
+    try {
+      // Compress the image if it's an image file
+      const compressedFile = await compressImage(file);
+
+      setState((prev) => ({
+        ...prev,
+        mediaFile: compressedFile,
+        isReviewing: true,
+      }));
+    } catch (error) {
+      console.error('Error compressing image:', error);
+      // If compression fails, use the original file
+      setState((prev) => ({
+        ...prev,
+        mediaFile: file,
+        isReviewing: true,
+      }));
+    }
+  }, []);
+
+  // Helper function to find the next step to navigate to
+  const findNextStep = useCallback((currentSelectedStep: InspectionStep, allSteps: InspectionStep[], uploadedSteps: string[]) => {
+    const currentIndex = allSteps.findIndex(step => step.id === currentSelectedStep.id);
+    if (currentIndex === -1) return null;
+
+    // Find the next incomplete step in the same category
+    const currentCategory = currentSelectedStep.category;
+    const sameCategorySteps = allSteps.filter(step => step.category === currentCategory);
+    const currentCategoryIndex = sameCategorySteps.findIndex(step => step.id === currentSelectedStep.id);
+
+    // Look for next incomplete step in same category
+    for (let i = currentCategoryIndex + 1; i < sameCategorySteps.length; i++) {
+      if (!uploadedSteps.includes(sameCategorySteps[i].id)) {
+        return sameCategorySteps[i];
+      }
+    }
+
+    // If no more steps in current category, find first incomplete step in next category
+    const categories = ['exterior', 'interior', 'bedrooms', 'bathrooms', 'utility', 'special'];
+    const currentCategoryIndex2 = categories.indexOf(currentCategory);
+
+    for (let catIndex = currentCategoryIndex2 + 1; catIndex < categories.length; catIndex++) {
+      const nextCategorySteps = allSteps.filter(step => step.category === categories[catIndex]);
+      for (const step of nextCategorySteps) {
+        if (!uploadedSteps.includes(step.id)) {
+          return step;
+        }
+      }
+    }
+
+    return null; // All steps completed
   }, []);
 
   const confirmMedia = useCallback(async () => {
@@ -200,38 +247,37 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({
         xhr.send(formData);
       });
 
-      // Complete the upload process
-      setState((prev) => ({
-        ...prev,
-        uploadedMedia: [
+      // Complete the upload process and find next step
+      setState((prev) => {
+        const newUploadedMedia = [
           ...prev.uploadedMedia,
           {
-            stepId: currentStep.id,
+            stepId: targetStep.id, // Use targetStep.id instead of currentStep.id
             fileUrl: uploadResult?.fileUrl || "https://example.com/mock-url",
             fileType: prev.captureMode as "photo" | "video",
           },
-        ],
-        mediaFile: null,
-        captureMode: null,
-        isReviewing: false,
-        isUploading: false,
-        uploadProgress: 100,
-      }));
+        ];
 
-      // If we've completed all steps, mark as completed
-      if (state.currentStepIndex >= state.steps.length - 1) {
-        setState((prev) => ({ ...prev, isCompleted: true }));
-      } else {
-        // Otherwise, go to next step
-        setState((prev) => ({
+        // Find the next step to navigate to
+        const uploadedStepIds = newUploadedMedia.map(media => media.stepId);
+        const nextStep = findNextStep(targetStep, prev.steps, uploadedStepIds);
+
+        return {
           ...prev,
-          currentStepIndex: prev.currentStepIndex + 1,
-        }));
-      }
+          uploadedMedia: newUploadedMedia,
+          selectedStep: nextStep, // Automatically select the next step
+          mediaFile: null,
+          captureMode: null,
+          isReviewing: false,
+          isUploading: false,
+          uploadProgress: 100,
+          isCompleted: nextStep === null, // Mark as completed if no more steps
+        };
+      });
 
       toast({
         title: "Photo Uploaded",
-        description: `${currentStep.title} saved to Google Drive`,
+        description: `${targetStep.title} saved successfully`,
       });
     } catch (error) {
       // Reset upload state on error

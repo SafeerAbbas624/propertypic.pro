@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/Home";
 import PropertyMediaUpload from "@/pages/PropertyMediaUpload";
+import PropertyCreated from "@/pages/PropertyCreated";
 import FileBrowser from "@/pages/FileBrowser";
 import { AdminSetup } from "@/pages/AdminSetup";
 import { InspectionProvider } from "@/context/InspectionContext";
@@ -23,6 +24,12 @@ function Router() {
       )} />
       {/* Public upload route: no login required */}
       <Route path="/upload/:token" component={PropertyMediaUpload} />
+      {/* Property created confirmation page: protected route */}
+      <Route path="/property-created/:token" component={() => (
+        <Protected>
+          <PropertyCreated />
+        </Protected>
+      )} />
       <Route path="/browse" component={() => (
         <Protected>
           <FileBrowser />
