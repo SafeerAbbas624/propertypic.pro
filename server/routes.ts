@@ -223,7 +223,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const properFileName = `${stepTitle.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_')}${extension}`;
 
       // Create local directory structure
-      const propertyFolder = `${lead.address.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_')}_${lead.city}`;
+      const propertyFolder = `${(lead.address || '').replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_')}_${lead.city || ''}`;
       const localDir = path.join(process.cwd(), 'uploads', propertyFolder);
 
       // Ensure directory exists
@@ -235,8 +235,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const localPath = path.join(localDir, properFileName);
       fs.writeFileSync(localPath, req.file.buffer);
 
+      console.log(`File saved successfully:`);
+      console.log(`  Local path: ${localPath}`);
+      console.log(`  File exists: ${fs.existsSync(localPath)}`);
+      console.log(`  Property folder: ${propertyFolder}`);
+
       // Generate local file URL
       const fileUrl = `/uploads/${propertyFolder}/${properFileName}`;
+      console.log(`  Generated file URL: ${fileUrl}`);
 
       // Optional: Try to sync to Google Drive if connected
       let googleDriveFileId = null;
@@ -514,12 +520,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const fileName = m.fileName;
           const addrPath = path.join(process.cwd(), 'uploads', addressFolder, fileName);
           const tokenPath = lead.token ? path.join(process.cwd(), 'uploads', lead.token, fileName) : '';
+
+          console.log(`Checking file paths for ${fileName}:`);
+          console.log(`  Address path: ${addrPath} (exists: ${fs.existsSync(addrPath)})`);
+          console.log(`  Token path: ${tokenPath} (exists: ${tokenPath ? fs.existsSync(tokenPath) : false})`);
+          console.log(`  Original fileUrl: ${m.fileUrl}`);
+
           if (fs.existsSync(addrPath)) {
             fileUrl = `/uploads/${addressFolder}/${fileName}`;
+            console.log(`  Using address path: ${fileUrl}`);
           } else if (lead.token && fs.existsSync(tokenPath)) {
             fileUrl = `/uploads/${lead.token}/${fileName}`;
+            console.log(`  Using token path: ${fileUrl}`);
+          } else {
+            console.log(`  File not found in either location, keeping original: ${fileUrl}`);
           }
-        } catch {}
+        } catch (error) {
+          console.error(`Error normalizing file URL for ${m.fileName}:`, error);
+        }
         return { ...m, fileUrl };
       });
 

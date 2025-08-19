@@ -76,10 +76,12 @@ import { createPgPool, ensureSchema, ensureDefaultAdmin, pgAuthRouter } from './
     serveStatic(app);
   }
 
-  // Serve the app on a local-only port (default 5050) to avoid conflicts
-  // with other services. Override with PORT env var if needed.
+  // Serve the app on all network interfaces (default 5050) to allow mobile access
+  // Override with PORT env var if needed.
   const port = Number(process.env.PORT || 5050);
-  server.listen(port, "127.0.0.1", () => {
+  server.listen(port, "0.0.0.0", () => {
     log(`serving on port ${port}`);
+    log(`Local access: http://localhost:${port}`);
+    log(`Network access: http://192.168.100.55:${port}`);
   });
 })();

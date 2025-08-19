@@ -65,7 +65,7 @@ export default function FileBrowser() {
   const { data: mediaFiles, isLoading: filesLoading, refetch: refetchFiles } = useQuery<MediaFile[]>({
     queryKey: [`/api/property-media/${selectedProperty?.token}`, selectedProperty?.token],
     enabled: !!selectedProperty?.token,
-    refetchOnWindowFocus: false
+    refetchOnWindowFocus: true
   });
 
   // Delete property folder mutation
@@ -436,6 +436,16 @@ export default function FileBrowser() {
                       <Badge variant="secondary">
                         {filteredFiles.length} files
                       </Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => refetchFiles()}
+                        disabled={filesLoading}
+                        className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                      >
+                        <RefreshCw className={`w-4 h-4 mr-2 ${filesLoading ? 'animate-spin' : ''}`} />
+                        Refresh
+                      </Button>
                       <Button
                         variant="outline"
                         size="sm"
