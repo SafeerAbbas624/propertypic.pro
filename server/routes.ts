@@ -286,6 +286,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // File is already saved locally, so this is not a critical error
       }
       
+      // Check if media already exists for this step (re-upload scenario)
+      const existingMedia = await storage.getMediaByLeadTokenAndStep(token, stepId);
+      if (existingMedia) {
+        console.log(`Re-upload detected for step ${stepId}. Deleting old media record and file.`);
+
+        // Delete old physical file if it exists
+        if (existingMedia.localPath && fs.existsSync(existingMedia.localPath)) {
+          try {
+            fs.unlinkSync(existingMedia.localPath);
+            console.log(`Deleted old file: ${existingMedia.localPath}`);
+          } catch (error) {
+            console.warn(`Failed to delete old file: ${existingMedia.localPath}`, error);
+          }
+        }
+
+        // Delete old database record
+        await storage.deleteMediaByLeadTokenAndStep(token, stepId);
+        console.log(`Deleted old media record for step ${stepId}`);
+      }
+
       // Save the media information in the database
       const fileType = req.file.mimetype.includes('image') ? 'photo' : 'video';
       const media = await storage.createPropertyMedia({
@@ -702,7 +722,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (const media of mediaToDelete) {
         try {
           // Delete from database
-          await storage.deleteMediaFile(media.id);
+          await storage.deleteMediaFile(media.id.toString());
 
           // Delete from filesystem if file exists
           if (media.localPath && fs.existsSync(media.localPath)) {

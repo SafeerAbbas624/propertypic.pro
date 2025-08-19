@@ -24,6 +24,8 @@ export interface IStorage {
   getMediaFileById(id: string): Promise<PropertyMedia | undefined>;
   deleteMediaFile(id: string): Promise<void>;
   deleteAllPropertyMedia(leadId: string): Promise<void>;
+  getMediaByLeadTokenAndStep(leadToken: string, step: string): Promise<PropertyMedia | undefined>;
+  deleteMediaByLeadTokenAndStep(leadToken: string, step: string): Promise<void>;
   // File browsing methods
   getAllPropertyLeadsWithMedia(): Promise<(PropertyLead & { mediaCount: number; isCompleted: boolean })[]>;
   getPropertyMediaWithDetails(leadId: string): Promise<PropertyMedia[]>;
@@ -226,6 +228,17 @@ export class DatabaseStorage implements IStorage {
 
   async deleteAllPropertyMedia(leadId: string): Promise<void> {
     await db.delete(propertyMedia).where(eq(propertyMedia.propertyLeadId, leadId as any));
+  }
+
+  async getMediaByLeadTokenAndStep(leadToken: string, step: string): Promise<PropertyMedia | undefined> {
+    const [media] = await db.select().from(propertyMedia)
+      .where(and(eq(propertyMedia.leadToken, leadToken), eq(propertyMedia.step, step)));
+    return media;
+  }
+
+  async deleteMediaByLeadTokenAndStep(leadToken: string, step: string): Promise<void> {
+    await db.delete(propertyMedia)
+      .where(and(eq(propertyMedia.leadToken, leadToken), eq(propertyMedia.step, step)));
   }
 }
 
