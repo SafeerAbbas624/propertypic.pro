@@ -235,14 +235,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const localPath = path.join(localDir, properFileName);
       fs.writeFileSync(localPath, req.file.buffer);
 
-      console.log(`File saved successfully:`);
-      console.log(`  Local path: ${localPath}`);
-      console.log(`  File exists: ${fs.existsSync(localPath)}`);
-      console.log(`  Property folder: ${propertyFolder}`);
-
       // Generate local file URL
       const fileUrl = `/uploads/${propertyFolder}/${properFileName}`;
-      console.log(`  Generated file URL: ${fileUrl}`);
 
       // Optional: Try to sync to Google Drive if connected
       let googleDriveFileId = null;
@@ -521,22 +515,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const addrPath = path.join(process.cwd(), 'uploads', addressFolder, fileName);
           const tokenPath = lead.token ? path.join(process.cwd(), 'uploads', lead.token, fileName) : '';
 
-          console.log(`Checking file paths for ${fileName}:`);
-          console.log(`  Address path: ${addrPath} (exists: ${fs.existsSync(addrPath)})`);
-          console.log(`  Token path: ${tokenPath} (exists: ${tokenPath ? fs.existsSync(tokenPath) : false})`);
-          console.log(`  Original fileUrl: ${m.fileUrl}`);
-
           if (fs.existsSync(addrPath)) {
-            fileUrl = `/uploads/${addressFolder}/${fileName}`;
-            console.log(`  Using address path: ${fileUrl}`);
+            // Add cache busting parameter based on file modification time
+            const stat = fs.statSync(addrPath);
+            const timestamp = stat.mtime.getTime();
+            fileUrl = `/uploads/${addressFolder}/${fileName}?v=${timestamp}`;
           } else if (lead.token && fs.existsSync(tokenPath)) {
-            fileUrl = `/uploads/${lead.token}/${fileName}`;
-            console.log(`  Using token path: ${fileUrl}`);
-          } else {
-            console.log(`  File not found in either location, keeping original: ${fileUrl}`);
+            // Add cache busting parameter based on file modification time
+            const stat = fs.statSync(tokenPath);
+            const timestamp = stat.mtime.getTime();
+            fileUrl = `/uploads/${lead.token}/${fileName}?v=${timestamp}`;
           }
         } catch (error) {
-          console.error(`Error normalizing file URL for ${m.fileName}:`, error);
+          // Silently handle errors in file URL normalization
         }
         return { ...m, fileUrl };
       });
@@ -913,8 +904,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Serve uploaded files
-  app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')));
+  // Serve uploaded files with cache control headers to prevent browser caching
+  app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
+    setHeaders: (res, path) => {
+      // Prevent browser caching of uploaded images to ensure re-uploaded photos show immediately
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+  }));
 
   const httpServer = createServer(app);
   return httpServer;

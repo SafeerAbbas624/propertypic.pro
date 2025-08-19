@@ -65,7 +65,8 @@ export default function FileBrowser() {
   const { data: mediaFiles, isLoading: filesLoading, refetch: refetchFiles } = useQuery<MediaFile[]>({
     queryKey: [`/api/property-media/${selectedProperty?.token}`, selectedProperty?.token],
     enabled: !!selectedProperty?.token,
-    refetchOnWindowFocus: true
+    refetchOnWindowFocus: true,
+    staleTime: 0 // Always consider data stale to ensure fresh data
   });
 
   // Delete property folder mutation
