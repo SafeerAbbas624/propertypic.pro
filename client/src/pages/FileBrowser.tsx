@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Download, Image, Video, FileText, Folder, Search, RefreshCw, ArrowLeft, Home, Eye, Calendar, HardDrive, Upload, Trash2, AlertTriangle } from 'lucide-react';
+import { Download, Image, Video, FileText, Folder, Search, RefreshCw, ArrowLeft, Home, Eye, Calendar, HardDrive, Upload, Trash2, AlertTriangle, Archive, Camera } from 'lucide-react';
 import { Separator } from '@/components/ui/separator';
 import { useLocation } from 'wouter';
 import { useToast } from '@/hooks/use-toast';
@@ -30,10 +30,11 @@ interface PropertyFolder {
   mediaCount: number;
   createdAt: string;
   propertyType: string;
+  isCompleted: boolean;
 }
 
 interface MediaFile {
-  id: number;
+  id: string;
   fileName: string;
   fileType: 'photo' | 'video';
   fileSize?: number;
@@ -98,7 +99,7 @@ export default function FileBrowser() {
 
   // Delete media file mutation
   const deleteMediaMutation = useMutation({
-    mutationFn: async (mediaId: number) => {
+    mutationFn: async (mediaId: string) => {
       const response = await fetch(`/api/property-media/${mediaId}`, {
         method: 'DELETE',
       });
@@ -124,6 +125,23 @@ export default function FileBrowser() {
       console.error('Delete media error:', error);
     },
   });
+
+  const handleBulkDownload = () => {
+    if (!selectedProperty) return;
+
+    const link = document.createElement('a');
+    link.href = `/api/property-media/${selectedProperty.token}/download-all`;
+    const zipFileName = `${selectedProperty.address.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_')}_${selectedProperty.city}_Photos.zip`;
+    link.download = zipFileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+
+    toast({
+      title: "Download Started",
+      description: "Your ZIP file download has started",
+    });
+  };
 
   const filteredFolders = propertyFolders?.filter(folder =>
     folder.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -336,10 +354,47 @@ export default function FileBrowser() {
                                   <Badge variant="secondary" className="text-xs">
                                     {folder.mediaCount} files
                                   </Badge>
+                                  <Badge
+                                    variant={folder.isCompleted ? "default" : "outline"}
+                                    className={`text-xs ${folder.isCompleted ? "bg-green-100 text-green-800 border-green-200" : "bg-yellow-100 text-yellow-800 border-yellow-200"}`}
+                                  >
+                                    {folder.isCompleted ? "Complete" : "In Progress"}
+                                  </Badge>
                                 </div>
                                 <p className="text-xs text-gray-400 mt-1">
                                   Created {formatDate(folder.createdAt)}
                                 </p>
+
+                                {/* Action buttons */}
+                                <div className="mt-3 pt-3 border-t border-gray-100">
+                                  {!folder.isCompleted ? (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="w-full text-xs"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        window.open(`/upload/${folder.token}`, '_blank');
+                                      }}
+                                    >
+                                      <Upload className="w-3 h-3 mr-1" />
+                                      Continue Upload
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="w-full text-xs"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        window.open(`/upload/${folder.token}`, '_blank');
+                                      }}
+                                    >
+                                      <Camera className="w-3 h-3 mr-1" />
+                                      Re-upload Photos
+                                    </Button>
+                                  )}
+                                </div>
                               </div>
                             </div>
                           </CardContent>
@@ -381,6 +436,16 @@ export default function FileBrowser() {
                       <Badge variant="secondary">
                         {filteredFiles.length} files
                       </Badge>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleBulkDownload}
+                        disabled={!filteredFiles.length}
+                        className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                      >
+                        <Archive className="w-4 h-4 mr-2" />
+                        Download All as ZIP
+                      </Button>
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
                           <Button
@@ -460,7 +525,10 @@ export default function FileBrowser() {
                                   className="w-full h-full object-cover"
                                   onError={(e) => {
                                     e.currentTarget.style.display = 'none';
-                                    e.currentTarget.nextElementSibling!.style.display = 'flex';
+                                    const nextElement = e.currentTarget.nextElementSibling as HTMLElement;
+                                    if (nextElement) {
+                                      nextElement.style.display = 'flex';
+                                    }
                                   }}
                                 />
                               ) : (

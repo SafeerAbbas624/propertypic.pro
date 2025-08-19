@@ -82,3 +82,44 @@ export function compressImage(
     img.src = URL.createObjectURL(file);
   });
 }
+
+/**
+ * Validates video duration and compresses if needed
+ * @param file - The video file to validate and compress
+ * @param maxDurationSeconds - Maximum duration in seconds (default: 120 for 2 minutes)
+ * @returns Promise<File> - The validated/compressed video file
+ */
+export function validateAndCompressVideo(
+  file: File,
+  maxDurationSeconds: number = 120
+): Promise<File> {
+  return new Promise((resolve, reject) => {
+    // Skip processing for non-video files
+    if (!file.type.startsWith('video/')) {
+      resolve(file);
+      return;
+    }
+
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+
+    video.onloadedmetadata = () => {
+      // Check video duration
+      if (video.duration > maxDurationSeconds) {
+        reject(new Error(`Video duration (${Math.round(video.duration)}s) exceeds maximum allowed duration (${maxDurationSeconds}s)`));
+        return;
+      }
+
+      // For now, we'll just return the original file
+      // In a production environment, you might want to implement actual video compression
+      // using libraries like FFmpeg.wasm, but that adds significant complexity and bundle size
+      resolve(file);
+    };
+
+    video.onerror = () => {
+      reject(new Error('Failed to load video metadata'));
+    };
+
+    video.src = URL.createObjectURL(file);
+  });
+}

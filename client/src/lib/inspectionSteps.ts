@@ -3,8 +3,9 @@ export interface InspectionStep {
   title: string;
   description: string;
   exampleImageUrl: string;
-  category: 'exterior' | 'interior' | 'bedrooms' | 'bathrooms' | 'utility' | 'special';
+  category: 'exterior' | 'interior' | 'bedrooms' | 'bathrooms' | 'utility' | 'special' | 'walkaround';
   isCompleted?: boolean;
+  mediaType?: 'photo' | 'video'; // Add media type specification
 }
 
 export interface PropertyFeatures {
@@ -271,6 +272,16 @@ export const getInspectionSteps = (
     });
   }
 
+  // Walkaround video step
+  const walkaroundStep: InspectionStep = {
+    id: 'property-walkaround',
+    title: 'Property Walkaround Video',
+    description: 'Record a 2-minute walkthrough video of the entire property, starting from the front entrance and moving through all main areas. Keep the video smooth and steady.',
+    exampleImageUrl: 'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&h=600',
+    category: 'walkaround',
+    mediaType: 'video'
+  };
+
   // Combine all steps based on property configuration
   const allSteps = [
     ...exteriorSteps,
@@ -278,7 +289,8 @@ export const getInspectionSteps = (
     ...bedroomSteps,
     ...bathroomSteps,
     ...utilitySteps,
-    ...specialSteps
+    ...specialSteps,
+    walkaroundStep
   ];
 
   // Add property-type specific steps

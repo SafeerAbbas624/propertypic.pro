@@ -9,7 +9,7 @@ import { getInspectionSteps, InspectionStep, PropertyFeatures } from "@/lib/insp
 import { useFirebaseStorage } from "@/hooks/use-firebase-storage";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
-import { compressImage } from "@/lib/utils";
+import { compressImage, validateAndCompressVideo } from "@/lib/utils";
 
 // Define the context state
 interface InspectionContextState {
@@ -31,7 +31,7 @@ interface InspectionContextState {
     fileUrl: string;
     fileType: "photo" | "video";
   }[];
-  startInspection: (token: string, propertyType: string, bedrooms?: number, bathrooms?: number, features?: PropertyFeatures) => void;
+  startInspection: (token: string, propertyType: string, bedrooms?: number, bathrooms?: number, features?: PropertyFeatures) => Promise<void>;
   selectStep: (step: InspectionStep | null) => void;
   goToNextStep: () => void;
   goToPreviousStep: () => void;
@@ -41,6 +41,7 @@ interface InspectionContextState {
   retakeMedia: () => void;
   completeInspection: () => void;
   resetInspection: () => void;
+  resetSelectedSteps: (stepIds: string[]) => Promise<void>;
 }
 
 // Create the context with a default value
@@ -75,13 +76,37 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({
   const { uploadMedia, isUploading } = useFirebaseStorage();
   const { toast } = useToast();
 
-  const startInspection = useCallback((token: string, propertyType: string, bedrooms = 3, bathrooms = 2, features: PropertyFeatures = {}) => {
+  const startInspection = useCallback(async (token: string, propertyType: string, bedrooms = 3, bathrooms = 2, features: PropertyFeatures = {}) => {
     const steps = getInspectionSteps(propertyType, bedrooms, bathrooms, features);
+
+    // Load existing uploaded media for this token
+    let existingMedia: { stepId: string; fileUrl: string; fileType: "photo" | "video" }[] = [];
+    try {
+      const response = await apiRequest("GET", `/api/property-leads/${token}/media`);
+      if (response.ok) {
+        const mediaData = await response.json();
+        existingMedia = mediaData.map((media: any) => ({
+          stepId: media.step,
+          fileUrl: media.fileUrl,
+          fileType: media.fileType,
+        }));
+      }
+    } catch (error) {
+      console.warn('Could not load existing media:', error);
+    }
+
+    // Find the first incomplete step
+    const uploadedStepIds = existingMedia.map(media => media.stepId);
+    const firstIncompleteStep = steps.find(step => !uploadedStepIds.includes(step.id)) || null;
+
     setState({
       ...initialState,
       token,
       propertyType,
       steps,
+      uploadedMedia: existingMedia,
+      selectedStep: firstIncompleteStep,
+      isCompleted: firstIncompleteStep === null, // Mark as completed if all steps are done
     });
   }, []);
 
@@ -118,24 +143,31 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({
 
   const setMediaFile = useCallback(async (file: File) => {
     try {
-      // Compress the image if it's an image file
-      const compressedFile = await compressImage(file);
+      let processedFile = file;
+
+      if (file.type.startsWith('image/')) {
+        // Compress the image if it's an image file
+        processedFile = await compressImage(file);
+      } else if (file.type.startsWith('video/')) {
+        // Validate and compress video if it's a video file
+        processedFile = await validateAndCompressVideo(file);
+      }
 
       setState((prev) => ({
         ...prev,
-        mediaFile: compressedFile,
+        mediaFile: processedFile,
         isReviewing: true,
       }));
     } catch (error) {
-      console.error('Error compressing image:', error);
-      // If compression fails, use the original file
-      setState((prev) => ({
-        ...prev,
-        mediaFile: file,
-        isReviewing: true,
-      }));
+      console.error('Error processing media file:', error);
+      toast({
+        title: "Media Processing Error",
+        description: error instanceof Error ? error.message : "Failed to process media file",
+        variant: "destructive",
+      });
+      // Don't set the file if processing fails
     }
-  }, []);
+  }, [toast]);
 
   // Helper function to find the next step to navigate to
   const findNextStep = useCallback((currentSelectedStep: InspectionStep, allSteps: InspectionStep[], uploadedSteps: string[]) => {
@@ -155,7 +187,7 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({
     }
 
     // If no more steps in current category, find first incomplete step in next category
-    const categories = ['exterior', 'interior', 'bedrooms', 'bathrooms', 'utility', 'special'];
+    const categories = ['exterior', 'interior', 'bedrooms', 'bathrooms', 'utility', 'special', 'walkaround'];
     const currentCategoryIndex2 = categories.indexOf(currentCategory);
 
     for (let catIndex = currentCategoryIndex2 + 1; catIndex < categories.length; catIndex++) {
@@ -262,6 +294,8 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({
         const uploadedStepIds = newUploadedMedia.map(media => media.stepId);
         const nextStep = findNextStep(targetStep, prev.steps, uploadedStepIds);
 
+        const isNowCompleted = nextStep === null;
+
         return {
           ...prev,
           uploadedMedia: newUploadedMedia,
@@ -271,12 +305,25 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({
           isReviewing: false,
           isUploading: false,
           uploadProgress: 100,
-          isCompleted: nextStep === null, // Mark as completed if no more steps
+          isCompleted: isNowCompleted, // Mark as completed if no more steps
         };
       });
 
+      // If inspection is now completed, update the server status
+      const uploadedStepIds = [...state.uploadedMedia.map(m => m.stepId), targetStep.id];
+      const nextStep = findNextStep(targetStep, state.steps, uploadedStepIds);
+      if (nextStep === null) {
+        // All steps completed, update server status
+        try {
+          await apiRequest("PUT", `/api/property-leads/${state.token}/complete`, {});
+          console.log('Inspection marked as complete on server');
+        } catch (error) {
+          console.error('Failed to mark inspection as complete:', error);
+        }
+      }
+
       toast({
-        title: "Photo Uploaded",
+        title: `${state.captureMode === 'video' ? 'Video' : 'Photo'} Uploaded`,
         description: `${targetStep.title} saved successfully`,
       });
     } catch (error) {
@@ -327,6 +374,48 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({
     setState(initialState);
   }, []);
 
+  const resetSelectedSteps = useCallback(async (stepIds: string[]) => {
+    try {
+      // Call API to reset steps in database
+      await apiRequest("POST", `/api/property-leads/${state.token}/reset-steps`, {
+        stepIds
+      });
+
+      setState((prev) => {
+        // Remove the selected steps from uploadedMedia
+        const filteredUploadedMedia = prev.uploadedMedia.filter(
+          media => !stepIds.includes(media.stepId)
+        );
+
+        // Find the first step that needs to be completed
+        const uploadedStepIds = filteredUploadedMedia.map(media => media.stepId);
+        const firstIncompleteStep = prev.steps.find(step => !uploadedStepIds.includes(step.id)) || null;
+
+        return {
+          ...prev,
+          uploadedMedia: filteredUploadedMedia,
+          selectedStep: firstIncompleteStep,
+          isCompleted: firstIncompleteStep === null,
+          mediaFile: null,
+          captureMode: null,
+          isReviewing: false,
+        };
+      });
+
+      toast({
+        title: "Steps Reset",
+        description: `${stepIds.length} step(s) have been reset for re-upload.`,
+      });
+    } catch (error) {
+      console.error('Error resetting steps:', error);
+      toast({
+        title: "Error",
+        description: "Failed to reset selected steps. Please try again.",
+        variant: "destructive",
+      });
+    }
+  }, [state.token, toast]);
+
   // Calculate current step based on current index
   const currentStep = state.steps.length > 0 && state.currentStepIndex < state.steps.length
     ? state.steps[state.currentStepIndex]
@@ -346,6 +435,7 @@ export const InspectionProvider: React.FC<{ children: React.ReactNode }> = ({
     retakeMedia,
     completeInspection,
     resetInspection,
+    resetSelectedSteps,
   };
 
   return (

@@ -11,22 +11,22 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   // Property Lead methods
   getPropertyLead(id: number): Promise<PropertyLead | undefined>;
-  getPropertyLeadById(id: number): Promise<PropertyLead | undefined>;
+  getPropertyLeadById(id: string): Promise<PropertyLead | undefined>;
   getPropertyLeadByToken(token: string): Promise<PropertyLead | undefined>;
   createPropertyLead(lead: InsertPropertyLead & { token: string }): Promise<PropertyLead>;
-  updatePropertyLeadStatus(id: number, status: string): Promise<PropertyLead>;
-  updatePropertyLeadDriveInfo(id: number, folderId: string, shareLink: string): Promise<PropertyLead>;
-  deletePropertyLead(id: number): Promise<void>;
+  updatePropertyLeadStatus(id: string, status: string): Promise<PropertyLead>;
+  updatePropertyLeadDriveInfo(id: string, folderId: string, shareLink: string): Promise<PropertyLead>;
+  deletePropertyLead(id: string): Promise<void>;
   // Property Media methods
   createPropertyMedia(media: InsertPropertyMedia): Promise<PropertyMedia>;
-  getPropertyMediaByLeadId(leadId: number): Promise<PropertyMedia[]>;
+  getPropertyMediaByLeadId(leadId: string): Promise<PropertyMedia[]>;
   getPropertyMediaByToken(token: string): Promise<PropertyMedia[]>;
-  getMediaFileById(id: number): Promise<PropertyMedia | undefined>;
-  deleteMediaFile(id: number): Promise<void>;
-  deleteAllPropertyMedia(leadId: number): Promise<void>;
+  getMediaFileById(id: string): Promise<PropertyMedia | undefined>;
+  deleteMediaFile(id: string): Promise<void>;
+  deleteAllPropertyMedia(leadId: string): Promise<void>;
   // File browsing methods
-  getAllPropertyLeadsWithMedia(): Promise<(PropertyLead & { mediaCount: number })[]>;
-  getPropertyMediaWithDetails(leadId: number): Promise<PropertyMedia[]>;
+  getAllPropertyLeadsWithMedia(): Promise<(PropertyLead & { mediaCount: number; isCompleted: boolean })[]>;
+  getPropertyMediaWithDetails(leadId: string): Promise<PropertyMedia[]>;
 }
 
 // Database storage implementation for PostgreSQL
@@ -49,7 +49,7 @@ export class DatabaseStorage implements IStorage {
 
   // Property Lead methods
   async getPropertyLead(id: number): Promise<PropertyLead | undefined> {
-    const [lead] = await db.select().from(propertyLeads).where(eq(propertyLeads.id, id));
+    const [lead] = await db.select().from(propertyLeads).where(eq(propertyLeads.id, id as any));
     return lead;
   }
 
@@ -82,7 +82,7 @@ export class DatabaseStorage implements IStorage {
     return lead;
   }
 
-  async updatePropertyLeadStatus(id: number, status: string): Promise<PropertyLead> {
+  async updatePropertyLeadStatus(id: string, status: string): Promise<PropertyLead> {
     const now = new Date();
     const [updatedLead] = await db
       .update(propertyLeads)
@@ -90,7 +90,7 @@ export class DatabaseStorage implements IStorage {
         mediaStatus: status,
         updatedAt: now
       })
-      .where(eq(propertyLeads.id, id))
+      .where(eq(propertyLeads.id, id as any))
       .returning();
     
     if (!updatedLead) {
@@ -100,7 +100,7 @@ export class DatabaseStorage implements IStorage {
     return updatedLead;
   }
 
-  async updatePropertyLeadDriveInfo(id: number, folderId: string, shareLink: string): Promise<PropertyLead> {
+  async updatePropertyLeadDriveInfo(id: string, folderId: string, shareLink: string): Promise<PropertyLead> {
     const now = new Date();
     const [updatedLead] = await db
       .update(propertyLeads)
@@ -109,7 +109,7 @@ export class DatabaseStorage implements IStorage {
         googleDriveShareLink: shareLink,
         updatedAt: now
       })
-      .where(eq(propertyLeads.id, id))
+      .where(eq(propertyLeads.id, id as any))
       .returning();
     
     if (!updatedLead) {
@@ -140,8 +140,8 @@ export class DatabaseStorage implements IStorage {
     return media;
   }
 
-  async getPropertyMediaByLeadId(leadId: number): Promise<PropertyMedia[]> {
-    return db.select().from(propertyMedia).where(eq(propertyMedia.propertyLeadId, leadId));
+  async getPropertyMediaByLeadId(leadId: string): Promise<PropertyMedia[]> {
+    return db.select().from(propertyMedia).where(eq(propertyMedia.propertyLeadId, leadId as any));
   }
 
   async getPropertyMediaByToken(token: string): Promise<PropertyMedia[]> {
@@ -179,51 +179,53 @@ export class DatabaseStorage implements IStorage {
   }
 
   // File browsing methods
-  async getAllPropertyLeadsWithMedia(): Promise<(PropertyLead & { mediaCount: number })[]> {
+  async getAllPropertyLeadsWithMedia(): Promise<(PropertyLead & { mediaCount: number; isCompleted: boolean })[]> {
     const leads = await db.select().from(propertyLeads);
     const result = [];
 
     for (const lead of leads) {
-      const mediaFiles = await db.select().from(propertyMedia).where(eq(propertyMedia.propertyLeadId, lead.id));
+      const mediaFiles = await db.select().from(propertyMedia).where(eq(propertyMedia.propertyLeadId, lead.id as any));
       result.push({
         ...lead,
-        mediaCount: mediaFiles.length
+        mediaCount: mediaFiles.length,
+        isCompleted: lead.mediaStatus === 'complete'
       });
     }
 
     return result;
   }
 
-  async getPropertyMediaWithDetails(leadId: number): Promise<PropertyMedia[]> {
-    return await db.select().from(propertyMedia).where(eq(propertyMedia.propertyLeadId, leadId));
+  async getPropertyMediaWithDetails(leadId: string): Promise<PropertyMedia[]> {
+    return await db.select().from(propertyMedia).where(eq(propertyMedia.propertyLeadId, leadId as any));
   }
 
   // Additional methods for delete functionality
-  async getPropertyLeadById(id: number): Promise<PropertyLead | undefined> {
-    const [lead] = await db.select().from(propertyLeads).where(eq(propertyLeads.id, id));
+  async getPropertyLeadById(id: string): Promise<PropertyLead | undefined> {
+    const [lead] = await db.select().from(propertyLeads).where(eq(propertyLeads.id, id as any));
     return lead;
   }
 
   async getPropertyLeadByUUID(uuid: string): Promise<PropertyLead | undefined> {
-    const [lead] = await db.select().from(propertyLeads).where(eq(propertyLeads.id, uuid));
+    // Since there's no UUID field, we'll use the token field for UUID-like lookups
+    const [lead] = await db.select().from(propertyLeads).where(eq(propertyLeads.token, uuid));
     return lead;
   }
 
-  async deletePropertyLead(id: number): Promise<void> {
-    await db.delete(propertyLeads).where(eq(propertyLeads.id, id));
+  async deletePropertyLead(id: string): Promise<void> {
+    await db.delete(propertyLeads).where(eq(propertyLeads.id, id as any));
   }
 
-  async getMediaFileById(id: number): Promise<PropertyMedia | undefined> {
-    const [media] = await db.select().from(propertyMedia).where(eq(propertyMedia.id, id));
+  async getMediaFileById(id: string): Promise<PropertyMedia | undefined> {
+    const [media] = await db.select().from(propertyMedia).where(eq(propertyMedia.id, id as any));
     return media;
   }
 
-  async deleteMediaFile(id: number): Promise<void> {
-    await db.delete(propertyMedia).where(eq(propertyMedia.id, id));
+  async deleteMediaFile(id: string): Promise<void> {
+    await db.delete(propertyMedia).where(eq(propertyMedia.id, id as any));
   }
 
-  async deleteAllPropertyMedia(leadId: number): Promise<void> {
-    await db.delete(propertyMedia).where(eq(propertyMedia.propertyLeadId, leadId));
+  async deleteAllPropertyMedia(leadId: string): Promise<void> {
+    await db.delete(propertyMedia).where(eq(propertyMedia.propertyLeadId, leadId as any));
   }
 }
 

@@ -14,6 +14,7 @@ const PropertyMediaUpload = () => {
   const token = params.token;
   const [, navigate] = useLocation();
   const { toast } = useToast();
+
   
   const {
     steps,
@@ -33,6 +34,7 @@ const PropertyMediaUpload = () => {
     retakeMedia,
     completeInspection,
     resetInspection,
+    resetSelectedSteps,
   } = useInspection();
 
   // Fetch property lead data to verify token and get property details
@@ -50,7 +52,7 @@ const PropertyMediaUpload = () => {
       });
       navigate("/");
     }
-    
+
     if (propertyLead && !isLoading) {
       // Parse special features from notes
       const specialFeatures = propertyLead.notes
@@ -70,7 +72,14 @@ const PropertyMediaUpload = () => {
         propertyLead.bedrooms || 3,
         propertyLead.bathrooms || 2,
         features
-      );
+      ).catch(error => {
+        console.error('Failed to start inspection:', error);
+        toast({
+          title: "Error",
+          description: "Failed to load inspection data",
+          variant: "destructive",
+        });
+      });
     }
   }, [propertyLead, isLoading, error]);
 
@@ -84,36 +93,7 @@ const PropertyMediaUpload = () => {
     );
   }
   
-  if (isCompleted) {
-    return (
-      <div className="max-w-md mx-auto px-4 py-6 min-h-screen flex flex-col bg-neutral-100">
-        <div className="flex-grow flex flex-col items-center justify-center text-center py-8">
-          <div className="bg-status-success text-white rounded-full p-4 inline-flex mb-6">
-            <Check className="h-10 w-10" />
-          </div>
-          <h1 className="text-2xl font-bold text-neutral-900 mb-4">All Done!</h1>
-          <p className="text-lg mb-6">Thank you for completing your property inspection.</p>
-          <p className="text-base text-neutral-900/80 mb-8">Your media has been successfully uploaded and saved.</p>
 
-          <div className="grid grid-cols-2 gap-2 w-full mb-8">
-            {/* This would be replaced with actual uploaded media in a production app */}
-            <div className="w-full h-28 bg-gray-200 rounded-lg animate-pulse"></div>
-            <div className="w-full h-28 bg-gray-200 rounded-lg animate-pulse"></div>
-            <div className="w-full h-28 bg-gray-200 rounded-lg animate-pulse"></div>
-            <div className="w-full h-28 bg-gray-200 rounded-lg animate-pulse"></div>
-          </div>
-        </div>
-
-        <Button 
-          className="bg-primary text-white py-4 px-6 rounded-lg text-lg font-semibold w-full flex items-center justify-center shadow-md"
-          onClick={() => navigate("/")}
-        >
-          <Home className="mr-2 h-5 w-5" />
-          Return Home
-        </Button>
-      </div>
-    );
-  }
 
   return (
     <FlexibleInspectionView
@@ -128,6 +108,7 @@ const PropertyMediaUpload = () => {
       onRetakeMedia={retakeMedia}
       onCompleteInspection={completeInspection}
       onGoHome={() => navigate("/")}
+      onResetSelectedSteps={resetSelectedSteps}
       selectedStep={selectedStep}
       mediaFile={mediaFile}
       captureMode={captureMode}

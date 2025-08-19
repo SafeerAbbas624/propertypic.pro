@@ -9,6 +9,7 @@ import { randomUUID } from "crypto";
 import { z } from "zod";
 import { insertPropertyLeadSchema, insertPropertyMediaSchema } from "@shared/schema";
 import { googleAuthService } from "./googleAuth";
+import archiver from "archiver";
 
 // Environment variables for OAuth verification
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -165,7 +166,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const driveFolder = await googleDriveService.createPropertyFolder(propertyAddress);
         
         // Update the lead with Google Drive information
-        await storage.updatePropertyLeadDriveInfo(lead.id, driveFolder.folderId, driveFolder.shareableLink);
+        await storage.updatePropertyLeadDriveInfo(lead.id.toString(), driveFolder.folderId, driveFolder.shareableLink);
         
         // Return updated lead with Google Drive info
         const updatedLead = await storage.getPropertyLead(lead.id);
@@ -191,7 +192,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: 'Property lead not found' });
       }
       
-      const updatedLead = await storage.updatePropertyLeadStatus(lead.id, 'complete');
+      const updatedLead = await storage.updatePropertyLeadStatus(lead.id.toString(), 'complete');
       res.json(updatedLead);
     } catch (error) {
       res.status(500).json({ message: 'Server error' });
@@ -256,7 +257,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             );
 
             // Update the lead with Google Drive information
-            await storage.updatePropertyLeadDriveInfo(lead.id, folderId, shareLink);
+            await storage.updatePropertyLeadDriveInfo(lead.id.toString(), folderId, shareLink);
             lead.googleDriveFolderId = folderId;
           }
 
@@ -388,7 +389,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (isUUID) {
         lead = await storage.getPropertyLeadByUUID(idOrToken);
       } else if (isNumeric) {
-        lead = await storage.getPropertyLeadById(parseInt(idOrToken, 10));
+        lead = await storage.getPropertyLeadById(idOrToken);
       } else {
         lead = await storage.getPropertyLeadByToken(idOrToken);
       }
@@ -434,7 +435,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const addressFolder = `${(lead.address || '').replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_')}_${lead.city || ''}`;
 
-      let media = await storage.getPropertyMediaWithDetails(lead.id);
+      let media = await storage.getPropertyMediaWithDetails(lead.id.toString());
 
       // Fallback: if DB is empty, scan uploads folder(s) and backfill
       if (!media || media.length === 0) {
@@ -483,7 +484,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
 
         // re-fetch after backfill
-        media = await storage.getPropertyMediaWithDetails(lead.id);
+        media = await storage.getPropertyMediaWithDetails(lead.id.toString());
       }
 
       // Normalize file URLs to whichever folder actually contains the file
@@ -506,6 +507,123 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error fetching property media:', error);
       res.status(500).json({ message: 'Server error' });
+    }
+  });
+
+  // Bulk download endpoint - download all files for a property as ZIP
+  app.get('/api/property-media/:leadId/download-all', async (req, res) => {
+    try {
+      const idOrToken = req.params.leadId;
+      console.log(`Bulk download request for: ${idOrToken}`);
+
+      // Try to resolve lead by: 1) UUID (property ID), 2) token
+      let lead = null;
+      const isUUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idOrToken);
+
+      if (isUUID) {
+        // Try by UUID (actual ID)
+        try {
+          lead = await storage.getPropertyLeadById(idOrToken);
+        } catch (error) {
+          console.log(`Failed to find by UUID: ${error}`);
+        }
+      }
+
+      if (!lead) {
+        // Try by token
+        try {
+          lead = await storage.getPropertyLeadByToken(idOrToken);
+        } catch (error) {
+          console.log(`Failed to find by token: ${error}`);
+        }
+      }
+
+      if (!lead) {
+        console.log(`Lead not found for: ${idOrToken}`);
+        return res.status(404).json({ message: 'Property lead not found' });
+      }
+
+      console.log(`Found lead: ${lead.name} (ID: ${lead.id})`);
+      const media = await storage.getPropertyMediaWithDetails(lead.id.toString());
+
+      if (!media || media.length === 0) {
+        console.log(`No media found for lead ID: ${lead.id}`);
+        return res.status(404).json({ message: 'No media files found for this property' });
+      }
+
+      console.log(`Found ${media.length} media files`);
+
+      // Create ZIP filename based on property address
+      const zipFileName = `${lead.address.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_')}_${lead.city}_Photos.zip`;
+      console.log(`Creating ZIP file: ${zipFileName}`);
+
+      // Set response headers for ZIP download
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${zipFileName}"`);
+
+      // Create archiver instance
+      const archive = archiver('zip', {
+        zlib: { level: 9 } // Maximum compression
+      });
+
+      // Handle archiver events
+      archive.on('error', (err) => {
+        console.error('Archive error:', err);
+        if (!res.headersSent) {
+          res.status(500).json({ message: 'Error creating ZIP file' });
+        }
+      });
+
+      archive.on('warning', (err) => {
+        console.warn('Archive warning:', err);
+      });
+
+      archive.on('end', () => {
+        console.log('Archive finalized successfully');
+      });
+
+      // Pipe archive to response
+      archive.pipe(res);
+
+      // Add files to archive
+      let filesAdded = 0;
+      for (const mediaFile of media) {
+        try {
+          console.log(`Processing file: ${mediaFile.fileName}`);
+
+          // Use the localPath directly from the database
+          const filePath = mediaFile.localPath;
+
+          console.log(`Checking file path: ${filePath}`);
+
+          if (filePath && fs.existsSync(filePath)) {
+            // Add file directly to archive root (no folders)
+            archive.file(filePath, { name: mediaFile.fileName });
+            filesAdded++;
+            console.log(`Added file to archive: ${mediaFile.fileName}`);
+          } else {
+            console.log(`File not found at path: ${filePath}`);
+          }
+        } catch (fileError) {
+          console.warn(`Could not add file ${mediaFile.fileName} to archive:`, fileError);
+        }
+      }
+
+      console.log(`Total files added to archive: ${filesAdded}`);
+
+      if (filesAdded === 0) {
+        console.log('No files found to add to archive');
+        return res.status(404).json({ message: 'No accessible files found for this property' });
+      }
+
+      // Finalize the archive
+      console.log('Finalizing archive...');
+
+      // Finalize the archive (no need to wait since it's streaming)
+      archive.finalize();
+    } catch (error) {
+      console.error('Bulk download error:', error);
+      res.status(500).json({ message: 'Server error during bulk download' });
     }
   });
 
@@ -554,31 +672,127 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Delete a property folder and all its files
-  app.delete('/api/property-folders/:id', async (req, res) => {
+  // Reset specific steps for re-upload
+  app.post('/api/property-leads/:token/reset-steps', async (req, res) => {
     try {
-      const propertyId = parseInt(req.params.id);
-      if (isNaN(propertyId)) {
-        return res.status(400).json({ message: 'Invalid property ID' });
+      const { token } = req.params;
+      const { stepIds } = req.body;
+
+      console.log(`Reset steps request for token: ${token}, steps: ${stepIds}`);
+
+      if (!stepIds || !Array.isArray(stepIds) || stepIds.length === 0) {
+        return res.status(400).json({ message: 'stepIds array is required' });
       }
 
-      // Get property details first
-      const property = await storage.getPropertyLeadById(propertyId);
+      // Get the property lead
+      const property = await storage.getPropertyLeadByToken(token);
       if (!property) {
         return res.status(404).json({ message: 'Property not found' });
       }
 
+      // Get existing media for this property
+      const existingMedia = await storage.getPropertyMediaByToken(token);
+
+      // Find media files to delete (matching the step IDs)
+      const mediaToDelete = existingMedia.filter(media => stepIds.includes(media.step));
+
+      console.log(`Found ${mediaToDelete.length} media files to delete for steps: ${stepIds.join(', ')}`);
+
+      // Delete media files from database and filesystem
+      for (const media of mediaToDelete) {
+        try {
+          // Delete from database
+          await storage.deleteMediaFile(media.id);
+
+          // Delete from filesystem if file exists
+          if (media.localPath && fs.existsSync(media.localPath)) {
+            fs.unlinkSync(media.localPath);
+            console.log(`Deleted file: ${media.localPath}`);
+          }
+        } catch (error) {
+          console.error(`Error deleting media ${media.id}:`, error);
+        }
+      }
+
+      // Update property status to incomplete since we removed some media
+      await storage.updatePropertyLeadStatus(property.id.toString(), 'incomplete');
+
+      console.log(`Successfully reset ${stepIds.length} steps for property ${property.name}`);
+
+      res.json({
+        message: 'Steps reset successfully',
+        resetSteps: stepIds,
+        deletedMediaCount: mediaToDelete.length
+      });
+    } catch (error) {
+      console.error('Error resetting steps:', error);
+      res.status(500).json({ message: 'Server error' });
+    }
+  });
+
+  // Delete a property folder and all its files
+  app.delete('/api/property-folders/:id', async (req, res) => {
+    try {
+      const idParam = req.params.id;
+      console.log(`Delete property folder request for ID: ${idParam}`);
+
+      // Try to find the property by UUID first, then by token
+      let property = null;
+
+      // First try to find by UUID (the actual ID)
+      try {
+        property = await storage.getPropertyLeadById(idParam);
+      } catch (error) {
+        console.log(`Failed to find by ID: ${error}`);
+      }
+
+      if (!property) {
+        // Try to find by token
+        try {
+          property = await storage.getPropertyLeadByToken(idParam);
+        } catch (error) {
+          console.log(`Failed to find by token: ${error}`);
+        }
+      }
+
+      if (!property) {
+        console.log(`Property not found for ID: ${idParam}`);
+        return res.status(404).json({ message: 'Property not found' });
+      }
+
+      console.log(`Found property: ${property.name} (ID: ${property.id})`);
+      const propertyId = property.id;
+
+      // Property already found above
+
       // Delete all media files for this property
-      await storage.deleteAllPropertyMedia(propertyId);
+      await storage.deleteAllPropertyMedia(propertyId.toString());
+      console.log(`Deleted all media files for property ID: ${propertyId}`);
 
       // Delete the property folder from filesystem
       const uploadDir = path.join(process.cwd(), 'uploads', property.token);
+      console.log(`Checking upload directory: ${uploadDir}`);
+
       if (fs.existsSync(uploadDir)) {
         fs.rmSync(uploadDir, { recursive: true, force: true });
+        console.log(`Deleted upload directory: ${uploadDir}`);
+      } else {
+        console.log(`Upload directory does not exist: ${uploadDir}`);
+      }
+
+      // Also check for address-based folder
+      const addressFolder = `${property.address.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '_')}_${property.city}`;
+      const addressDir = path.join(process.cwd(), 'uploads', addressFolder);
+      console.log(`Checking address directory: ${addressDir}`);
+
+      if (fs.existsSync(addressDir)) {
+        fs.rmSync(addressDir, { recursive: true, force: true });
+        console.log(`Deleted address directory: ${addressDir}`);
       }
 
       // Delete the property lead record
-      await storage.deletePropertyLead(propertyId);
+      await storage.deletePropertyLead(propertyId.toString());
+      console.log(`Deleted property lead record for ID: ${propertyId}`);
 
       res.json({ message: 'Property folder and all files deleted successfully' });
     } catch (error) {
@@ -590,24 +804,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Delete a specific media file
   app.delete('/api/property-media/:id', async (req, res) => {
     try {
-      const mediaId = parseInt(req.params.id);
-      if (isNaN(mediaId)) {
+      const mediaId = req.params.id;
+      console.log(`Delete media request for ID: ${mediaId}`);
+
+      if (!mediaId) {
+        console.log('Invalid media ID provided');
         return res.status(400).json({ message: 'Invalid media ID' });
       }
 
       // Get media file details first
       const mediaFile = await storage.getMediaFileById(mediaId);
       if (!mediaFile) {
+        console.log(`Media file not found for ID: ${mediaId}`);
         return res.status(404).json({ message: 'Media file not found' });
       }
+
+      console.log(`Found media file: ${mediaFile.fileName}, localPath: ${mediaFile.localPath}`);
 
       // Delete the physical file
       if (mediaFile.localPath && fs.existsSync(mediaFile.localPath)) {
         fs.unlinkSync(mediaFile.localPath);
+        console.log(`Deleted physical file: ${mediaFile.localPath}`);
+      } else {
+        console.log(`Physical file not found or no localPath: ${mediaFile.localPath}`);
       }
 
       // Delete the database record
       await storage.deleteMediaFile(mediaId);
+      console.log(`Deleted database record for media ID: ${mediaId}`);
 
       res.json({ message: 'Media file deleted successfully' });
     } catch (error) {
